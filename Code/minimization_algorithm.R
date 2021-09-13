@@ -40,7 +40,7 @@ MinimRandomize <- function(covariate.mat, contraindications, k.arms, imbalance.f
   hypothetical_imbalances <- vector("integer", length = i_factors)
   weighted_imbalance_scores <- vector("numeric", length = k.arms)
 
-  for(cur_subj in 1:n_subj){
+  for(cur_subj in 1:10){
     
     subj_covars <- covariate.mat[cur_subj,]
     eligible_arms <- setdiff(arm.vec, contraindications[cur_subj])
@@ -50,7 +50,12 @@ MinimRandomize <- function(covariate.mat, contraindications, k.arms, imbalance.f
       hypo_factor_counts <- assignments_by_covars
       
       for(covariate in 1:i_factors){
+      #  print(hypo_factor_counts[covariate, subj_covars[covariate], arm])
+        
         hypo_factor_counts[covariate, subj_covars[covariate], arm] <- hypo_factor_counts[covariate, subj_covars[covariate], arm] + 1
+        
+    #    print(hypo_factor_counts[covariate, subj_covars[covariate], arm])
+     #   print(imbalance.func(hypo_factor_counts[covariate, subj_covars[covariate],]))
         hypothetical_imbalances[covariate] <- imbalance.func(hypo_factor_counts[covariate, subj_covars[covariate],])
       }
       
@@ -58,19 +63,27 @@ MinimRandomize <- function(covariate.mat, contraindications, k.arms, imbalance.f
         # TODO: Better workaround to ensure that 1:k.arms isn't empty. 
         #Adding pseudovalues doesn't change range-based imbalance functions but could change variance-based ones
         
-        current_allocations <- table(c(allocation_vec, 1:k.arms)) 
+        current_allocations <- table(c(allocation_vec[1:(cur_subj-1)], 1:k.arms))
+        
+        if(cur_subj %% 100 == 0) print(current_allocations)
         
         hypothetical_allocations <- current_allocations
         hypothetical_allocations[arm] <- hypothetical_allocations[arm] + 1
         
+        if(cur_subj %% 100 == 0) print(hypothetical_allocations)
+        
+        
         overall_imbalance <- imbalance.func(hypothetical_allocations)
+        
+        if(cur_subj %% 100 == 0) print(overall_imbalance)
+        
       }
       
       weighted_imbalance_scores[arm] <- ifelse(use.overall.imbalance == TRUE,
                                                sum(covar.weights * c(overall_imbalance, hypothetical_imbalances)),
                                                sum(covar.weights * hypothetical_imbalances))
     }
-    
+    print(weighted_imbalance_scores)
     # Remove arms that are contraindicated
     feasible_imbalance_scores <- weighted_imbalance_scores[eligible_arms]
     # Which arm(s) minimizes the weighted imbalance score
@@ -125,8 +138,33 @@ MinimRandomize <- function(covariate.mat, contraindications, k.arms, imbalance.f
 }
 
 
-StratifyThenMinimizeRand <- function(){
+StratifyThenMinimizeRand <- function(covariate.mat, contraindications, duloxetine.grp.num = 2, k.arms, ...){
+  covariate_mat_w_contras <- cbind(contraindications, covariate.mat)
   
+  duloxetine_eligible_subjects <- covariate_mat_w_contras[contraindications != duloxetine.grp.num,]
+  duloxetine_ineligible_subjects <- covariate_mat_w_contras[contraindications == duloxetine.grp.num,]
+  
+  dulox_eligible_assignments <- MinimRandomize(covariate.mat = duloxetine_eligible_subjects, contraindications = contraindications[contraindications != 1],
+                                               k.arms = k.arms, 
+                                               ...)
+  
+  dulox_ineligible_assignments <- MinimRandomize(covariate.mat = duloxetine_ineligible_subjects, 
+                                                 contraindications = contraindications[contraindications == 1],
+                                                 k.arms = k.arms,
+                                               ...)
+  
+  # Make the ineligible contraindication covariate numbering match 
+  dulox_inel_counts <- c(table(dulox_ineligible_assignments$Assignments))
+  dulox_ineligible_assignments$CovarInfo[1,1:k.arms,] <- 0
+  dulox_ineligible_assignments$CovarInfo[1,duloxetine.grp.num,] <- dulox_inel_counts
+  
+  
+  combined_assignments <- list(Assignments = c(dulox_eligible_assignments$Assignments, dulox_ineligible_assignments$Assignments),
+                               CovarInfo = dulox_eligible_assignments$CovarInfo + dulox_ineligible_assignments$CovarInfo,
+                               EligibleCovarInfo = dulox_eligible_assignments$CovarInfo,
+                               IneligibleCovarInfo = dulox_ineligible_assignments$CovarInfo)
+  
+  return(combined_assignments)
 }
 
 
