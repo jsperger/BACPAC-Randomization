@@ -10,10 +10,10 @@
 #' @param other.arm.p.func
 #' 
 #' 
-MinimRandomize <- function(covariate.mat, contraindications, k.arms, imbalance.func, 
+MinimRandomize <- function(covariate.mat, contraindications, k.arms, imbalance.func =  function(x) diff(range(x)), 
                            use.overall.imbalance = FALSE, 
                            covar.weights = 1,
-                                    coin.bias = 2/3, other.arm.p.func){
+                                    coin.bias = 2/3, other.arm.p.func = .MinimEqualProb, ...){
   
   .MinimRandomizeCheckInputs(covariate.mat = covariate.mat,
                              k.arms = k.arms,
@@ -40,7 +40,7 @@ MinimRandomize <- function(covariate.mat, contraindications, k.arms, imbalance.f
   hypothetical_imbalances <- vector("integer", length = i_factors)
   weighted_imbalance_scores <- vector("numeric", length = k.arms)
 
-  for(cur_subj in 1:10){
+  for(cur_subj in 1:n_subj){
     
     subj_covars <- covariate.mat[cur_subj,]
     eligible_arms <- setdiff(arm.vec, contraindications[cur_subj])

@@ -1,0 +1,64 @@
+---
+title: "Stage One Randomization Imbalance Simulations"
+author: "John Sperger"
+date: "9/17/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r libs_and_scripts, include = FALSE}
+library(tidyverse)
+library(fabricatr)
+library(furrr)
+if (str_detect(here::here(), "jsperger") == TRUE) plan(multisession, workers = 12) else plan(sequential)
+
+source("./Code/minimization_algorithm.R")
+source("./Code/generate_study_data.R")
+source("./Code/analyze_imbalances.R")
+
+```
+
+## 
+
+```{r sim_settings}
+sim_reps <- 5L
+covariate_dimensions <- 1:6
+sim_seed <- 3990
+# Seed from https://nclottery.com/Pick4 Daytime Draw Thursday, Sep 16
+
+# Study parameters
+n_subj <- 630
+n_sites <- 10
+k_arms <- 4
+
+# Data generation parameters
+coin_bias <- 2/3
+bin_props = seq(from = .1, to = .9, length.out = length(covariate_dimensions))
+bin_iccs = .05
+contra_probs <- 0
+
+```
+
+```{r wrappers}
+
+MapWrapper <- function(){
+  setting_run <- future_map(seq_len(sim_reps), 
+                            ~GenerateStudyData(i = ., 
+                                               n.subj = n_subj,
+                                               k.arms = k_arms, 
+                                               n.sites = n_sites, 
+                                               bin.props = bin_props, 
+                                               bin.iccs = bin_iccs,
+                                               bias = coin_bias,
+                                               contra.probs = contra_probs),
+                            .options = furrr_options(seed = sim_seed))
+  return(setting_run)
+}
+
+ImbalanceWrapper <- function(df.list, d.dim){
+  future_map_dfr(df.list, ~AnalyzeImbalances(indf = ., vars.to.check = paste0("X_", 1:d.dim)))
+}
+```
