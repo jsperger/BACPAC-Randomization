@@ -8,6 +8,8 @@
 #' 
 #' 
 GenerateStudyData <- function(i = 1, n.subj = 600, k.arms = 4, n.sites = 10, bin.props = runif(5, min = .1, max = .9), bin.iccs = .1,
+                              stratify.by.site = FALSE,
+                              stratify.by.contra = FALSE,
                               ...) {
   study_data <- tibble(ID = 1:n.subj,
                        Site = sample(1:n.sites, size = n.subj, replace = TRUE)) %>%
@@ -20,11 +22,40 @@ GenerateStudyData <- function(i = 1, n.subj = 600, k.arms = 4, n.sites = 10, bin
   
   study_data <- AddContraVar(study.data = study_data, ...)
   
-  study_data$A1 <- MinimRandomize(covariate.mat = covar_matrix, 
-                                  contraindications = study_data$Contra, 
-                                  k.arms = k.arms,  
-                                  ...)$Assignments
-  
+  if(stratify.by.site == TRUE & stratify.by.contra == FALSE){
+    study_data$A1 <- NA
+    for(site in 1:n.sites){
+      site_participant_lgl <- study_data$Site == site
+      site_assignments <- MinimRandomize(covariate.mat = covar_matrix[site_participant_lgl,], 
+                                         contraindications = study_data$Contra[site_participant_lgl], 
+                                         k.arms = k.arms,  
+                                         ...)$Assignments
+      study_data$A1[site_participant_lgl] <- site_assignments
+    }
+  }
+  if(stratify.by.site == TRUE & stratify.by.contra == TRUE){
+      study_data$A1 <- NA
+      for(site in 1:n.sites){
+        site_participant_lgl <- study_data$Site == site
+        site_assignments <- StratifyThenMinimizeRand(covariate.mat = covar_matrix[site_participant_lgl,], 
+                                           contraindications = study_data$Contra[site_participant_lgl], 
+                                           k.arms = k.arms,  
+                                           ...)$Assignments
+        study_data$A1[site_participant_lgl] <- site_assignments
+      }
+  } 
+  if(stratify.by.site == FALSE & stratify.by.contra == FALSE){
+    study_data$A1 <- MinimRandomize(covariate.mat = covar_matrix, 
+                                    contraindications = study_data$Contra, 
+                                    k.arms = k.arms,  
+                                    ...)$Assignments
+  }
+    if(stratify.by.site == FALSE & stratify.by.contra == TRUE){
+      study_data$A1 <- StratifyThenMinimizeRand(covariate.mat = covar_matrix, 
+                                      contraindications = study_data$Contra, 
+                                      k.arms = k.arms,  
+                                      ...)$Assignments
+    }
   
   return(study_data)
 }

@@ -26,7 +26,7 @@ MinimRandomize <- function(covariate.mat, contraindications, k.arms, imbalance.f
   # Define useful constants
   n_subj <- nrow(covariate.mat)
   i_factors <- ncol(covariate.mat)
-  max_fac_levels <- apply(covariate.mat, 2, max)
+  max_fac_levels <- apply(covariate.mat, 2, max, na.rm = TRUE)
   arm.vec <- 1:k.arms
     
   # Pre-allocate resources
@@ -50,12 +50,9 @@ MinimRandomize <- function(covariate.mat, contraindications, k.arms, imbalance.f
       hypo_factor_counts <- assignments_by_covars
       
       for(covariate in 1:i_factors){
-      #  print(hypo_factor_counts[covariate, subj_covars[covariate], arm])
-        
+
         hypo_factor_counts[covariate, subj_covars[covariate], arm] <- hypo_factor_counts[covariate, subj_covars[covariate], arm] + 1
         
-    #    print(hypo_factor_counts[covariate, subj_covars[covariate], arm])
-     #   print(imbalance.func(hypo_factor_counts[covariate, subj_covars[covariate],]))
         hypothetical_imbalances[covariate] <- imbalance.func(hypo_factor_counts[covariate, subj_covars[covariate],])
       }
       
@@ -65,17 +62,11 @@ MinimRandomize <- function(covariate.mat, contraindications, k.arms, imbalance.f
         
         current_allocations <- table(c(allocation_vec[1:(cur_subj-1)], 1:k.arms))
         
-        if(cur_subj %% 100 == 0) print(current_allocations)
-        
         hypothetical_allocations <- current_allocations
         hypothetical_allocations[arm] <- hypothetical_allocations[arm] + 1
         
-        if(cur_subj %% 100 == 0) print(hypothetical_allocations)
-        
         
         overall_imbalance <- imbalance.func(hypothetical_allocations)
-        
-        if(cur_subj %% 100 == 0) print(overall_imbalance)
         
       }
       
@@ -83,11 +74,10 @@ MinimRandomize <- function(covariate.mat, contraindications, k.arms, imbalance.f
                                                sum(covar.weights * c(overall_imbalance, hypothetical_imbalances)),
                                                sum(covar.weights * hypothetical_imbalances))
     }
-    print(weighted_imbalance_scores)
     # Remove arms that are contraindicated
     feasible_imbalance_scores <- weighted_imbalance_scores[eligible_arms]
     # Which arm(s) minimizes the weighted imbalance score
-    minimizing_arms <- which(feasible_imbalance_scores == min(feasible_imbalance_scores))
+    minimizing_arms <- which(feasible_imbalance_scores == min(feasible_imbalance_scores, na.rm = TRUE))
     
     #Break ties randomly
     preferred_arm <- ifelse(length(minimizing_arms == 1), minimizing_arms,
@@ -137,26 +127,30 @@ MinimRandomize <- function(covariate.mat, contraindications, k.arms, imbalance.f
   return(TRUE)
 }
 
-
+#' Stratify by duloxetine contraindication and then use minimization
 StratifyThenMinimizeRand <- function(covariate.mat, contraindications, duloxetine.grp.num = 2, k.arms, ...){
+  stop("Function not currently working correctly - need to adjust targets within eligibility groups away from equal so that overall allocation is equal")
   covariate_mat_w_contras <- cbind(contraindications, covariate.mat)
   
   duloxetine_eligible_subjects <- covariate_mat_w_contras[contraindications != duloxetine.grp.num,]
   duloxetine_ineligible_subjects <- covariate_mat_w_contras[contraindications == duloxetine.grp.num,]
   
-  dulox_eligible_assignments <- MinimRandomize(covariate.mat = duloxetine_eligible_subjects, contraindications = contraindications[contraindications != 1],
+  dulox_eligible_assignments <- MinimRandomize(covariate.mat = duloxetine_eligible_subjects, contraindications = contraindications[contraindications != duloxetine.grp.num],
                                                k.arms = k.arms, 
                                                ...)
   
   dulox_ineligible_assignments <- MinimRandomize(covariate.mat = duloxetine_ineligible_subjects, 
-                                                 contraindications = contraindications[contraindications == 1],
+                                                 contraindications = contraindications[contraindications == duloxetine.grp.num],
                                                  k.arms = k.arms,
                                                ...)
   
-  # Make the ineligible contraindication covariate numbering match 
+  # Make the ineligible contraindication covariate numbering match that of the eligible 
   dulox_inel_counts <- c(table(dulox_ineligible_assignments$Assignments))
+  dulox_count_replacement <- c(dulox_inel_counts[1:(duloxetine.grp.num - 1)], 
+                               0, 
+                               dulox_inel_counts[duloxetine.grp.num:length(dulox_inel_counts)])
   dulox_ineligible_assignments$CovarInfo[1,1:k.arms,] <- 0
-  dulox_ineligible_assignments$CovarInfo[1,duloxetine.grp.num,] <- dulox_inel_counts
+  dulox_ineligible_assignments$CovarInfo[1,duloxetine.grp.num,] <- dulox_count_replacement
   
   
   combined_assignments <- list(Assignments = c(dulox_eligible_assignments$Assignments, dulox_ineligible_assignments$Assignments),

@@ -24,13 +24,14 @@ source("./Code/analyze_imbalances.R")
 ## 
 
 ```{r sim_settings}
-sim_reps <- 5L
-covariate_dimensions <- 1:6
+sim_reps <- 1000L
+covariate_dimensions <- 1:4
+d_dim <- length(covariate_dimensions)
 sim_seed <- 3990
 # Seed from https://nclottery.com/Pick4 Daytime Draw Thursday, Sep 16
 
 # Study parameters
-n_subj <- 630
+n_subj <- 740
 n_sites <- 10
 k_arms <- 4
 
@@ -38,14 +39,51 @@ k_arms <- 4
 coin_bias <- 2/3
 bin_props = seq(from = .1, to = .9, length.out = length(covariate_dimensions))
 bin_iccs = .05
-contra_probs <- 0
+contra_probs <- c(.55, .4, .025, .025) # None, dulox, pt, cbt
 
 ```
 
 ```{r wrappers}
+ImbalanceWrapper <- function(df.list, d.dim){
+  future_map_dfr(df.list, ~AnalyzeImbalances(indf = ., vars.to.check = paste0("X_", 1:d.dim)))
+}
 
-MapWrapper <- function(){
-  setting_run <- future_map(seq_len(sim_reps), 
+# Using the result of ImbalanceWrapper create a table with five number summaries of different imbalance measures
+CreateImbalanceTable <- function(imbalances.df, method.name, d.dim){
+  imbalances_long <- imbalances.df %>% pivot_longer(cols = ends_with("Imbalance"), 
+                                           names_pattern = "(.*)Imbalance",
+                                           names_to = "Comparison",
+                                           values_to = "MaxImbalance")
+  
+  if("Covariates" %in% colnames(imbalances_long) == FALSE) imbalances_long$Covariates <- d.dim
+  
+  covar_summary <-imbalances_long %>% 
+    mutate_at(., "Comparison", ~factor(., levels = c("MaxTreatment",
+                                                     "MaxStudywideCov",
+                                                     "MaxSiteTreatment",
+                                                     "MaxSiteCov"),
+                                       labels = c("Study-wide",
+                                                  "Factor across study",
+                                                  "Within-site",
+                                                  "Factor within site"))) %>% group_by(Covariates, Comparison) %>% 
+    group_modify(~ {
+        .x %>%
+            purrr::map_dfc(fivenum) %>%
+            mutate(nms = c("Min", "Q1", "Median", "Q3", "Max"))
+    }) %>% 
+    pivot_wider(names_from = "nms", values_from = "MaxImbalance") %>% 
+    arrange(Comparison, Covariates)
+  
+  covar_summary$Method <- method.name
+  
+  return(covar_summary)
+}
+```
+
+
+```{r site_strat_with_contras}
+# No stratification by site or contraindication, no overall imbalance term
+contras_unstrat_no_overall <- future_map(seq_len(sim_reps), 
                             ~GenerateStudyData(i = ., 
                                                n.subj = n_subj,
                                                k.arms = k_arms, 
@@ -53,12 +91,66 @@ MapWrapper <- function(){
                                                bin.props = bin_props, 
                                                bin.iccs = bin_iccs,
                                                bias = coin_bias,
+                                               stratify.by.site = FALSE,
+                                               stratify.by.contra = FALSE,
                                                contra.probs = contra_probs),
                             .options = furrr_options(seed = sim_seed))
-  return(setting_run)
-}
 
-ImbalanceWrapper <- function(df.list, d.dim){
-  future_map_dfr(df.list, ~AnalyzeImbalances(indf = ., vars.to.check = paste0("X_", 1:d.dim)))
-}
+# No stratification by site or contraindication, includes an overall imbalance term
+contras_unstrat_w_overall <- future_map(seq_len(sim_reps), 
+                            ~GenerateStudyData(i = ., 
+                                               n.subj = n_subj,
+                                               k.arms = k_arms, 
+                                               n.sites = n_sites, 
+                                               bin.props = bin_props, 
+                                               bin.iccs = bin_iccs,
+                                               bias = coin_bias,
+                                               stratify.by.site = FALSE,
+                                               stratify.by.contra = FALSE,
+                                               use.overall.imbalance = TRUE,
+                                               contra.probs = contra_probs),
+                            .options = furrr_options(seed = sim_seed))
+
+# Stratification by site but not contraindication, no overall imbalance term
+contras_strat_by_site <- future_map(seq_len(sim_reps), 
+                            ~GenerateStudyData(i = ., 
+                                               n.subj = n_subj,
+                                               k.arms = k_arms, 
+                                               n.sites = n_sites, 
+                                               bin.props = bin_props, 
+                                               bin.iccs = bin_iccs,
+                                               bias = coin_bias,
+                                               stratify.by.site = TRUE,
+                                               stratify.by.contra = FALSE,
+                                               contra.probs = c(.55, .4, .025, .025)),
+                            .options = furrr_options(seed = sim_seed))
+
+# Stratification by site but not contraindication, no overall imbalance term
+contras_strat_by_site_w_overall <- future_map(seq_len(sim_reps), 
+                            ~GenerateStudyData(i = ., 
+                                               n.subj = n_subj,
+                                               k.arms = k_arms, 
+                                               n.sites = n_sites, 
+                                               bin.props = bin_props, 
+                                               bin.iccs = bin_iccs,
+                                               bias = coin_bias,
+                                               stratify.by.site = TRUE,
+                                               stratify.by.contra = FALSE,
+                                               use.overall.imbalance = TRUE,
+                                               contra.probs = c(.55, .4, .025, .025)),
+                            .options = furrr_options(seed = sim_seed))
+
+```
+
+```{r site_strat_imbalances}
+imbalances_contras_unstrat <- ImbalanceWrapper(contras_unstrat_no_overall, d_dim)
+imbalances_contras_unstrat_overall_term <- ImbalanceWrapper(contras_unstrat_w_overall, d_dim)
+imbalances_strat_by_site <- ImbalanceWrapper(contras_strat_by_site, d.dim = d_dim)
+imbalances_strat_by_site_overall_term <- ImbalanceWrapper(contras_strat_by_site_w_overall, d.dim = d_dim)
+
+imbalance_table_unstrat <- CreateImbalanceTable(imbalances_contras_unstrat, "Unstratified, no overall term", d_dim)
+imbalance_table_overall_term <- CreateImbalanceTable(imbalances_contras_unstrat_overall_term, "Unstratified, overall term", d_dim)
+imbalance_table_strat_by_site <- CreateImbalanceTable(imbalances_strat_by_site, "Stratified by site, no overall term", d_dim)
+imbalance_table_strat_by_site_overall <- CreateImbalanceTable(imbalances_strat_by_site_overall_term, "Stratified by site, overall term", d_dim)
+
 ```
