@@ -60,6 +60,68 @@ GenerateStudyData <- function(i = 1, n.subj = 600, k.arms = 4, n.sites = 10, bin
   return(study_data)
 }
 
+#' Generate covariate data for a study. Does not create treatment assignments
+#' @param i iteration number. A workaround parameter to facilitate working with map functions
+#' @param n.subj number of subjects
+#' @param k.arms number of arms
+#' @param n.sites number of sites
+#' @param bin.props vector of probabilities of successes for each binary covariate. 
+#' The length of the vector determines the number of binary covariates
+#' @param bin.iccs vector of intra-cluster correlation coefficients the same length as bin.props, or a single constant that will be used for all covariates
+#' 
+#' 
+GenerateStudyCovariateData <- function(i = 1, 
+                                       n.subj = 740, 
+                                       k.arms = 4, 
+                                       n.sites = 10, 
+                                       bin.props = runif(5, min = .1, max = .9), 
+                                       bin.iccs = .1,
+                              ...) {
+  
+  study_data <- tibble(ID = 1:n.subj,
+                       Site = sample(1:n.sites, size = n.subj, replace = TRUE)) %>%
+    MakeCorrelatedBinaryCovars(indf = ., bin.props = bin.props, bin.iccs = bin.iccs)
+  
+  covar_matrix <- study_data %>% 
+    select(Site, starts_with("X_")) %>% 
+    mutate_all(factor) %>%  mutate_all(as.numeric)  %>% #balanceRandomize function is expecting factor levels starting at 1 not 0 or -1
+    as.matrix
+  
+  study_data <- AddContraVar(study.data = study_data, ...)
+  
+  return(study_data)
+}
+
+#' Add assignments to study data created by \code{GenerateStudyCovariateData}
+#' 
+#' @param stratify.by.site logical indicating whether to stratify by site before applying minimization algorithm
+GenerateAssignments <- function(study.data, n.sites, k.arms, stratify.by.site = FALSE, ...){
+  covar_matrix <- study.data %>% 
+    select(Site, starts_with("X_")) %>% 
+    mutate_all(factor) %>%  mutate_all(as.numeric)  %>% #balanceRandomize function is expecting factor levels starting at 1 not 0 or -1
+    as.matrix
+  
+  if(stratify.by.site == TRUE){
+    study.data$A1 <- NA
+    for(site in 1:n.sites){
+      site_participant_lgl <- study.data$Site == site
+      site_assignments <- MinimRandomize(covariate.mat = covar_matrix[site_participant_lgl,], 
+                                         contraindications = study.data$Contra[site_participant_lgl], 
+                                         k.arms = k.arms,  
+                                         ...)$Assignments
+      study.data$A1[site_participant_lgl] <- site_assignments
+    }
+  } else{
+    study.data$A1 <- MinimRandomize(covariate.mat = covar_matrix, 
+                                    contraindications = study.data$Contra, 
+                                    k.arms = k.arms,  
+                                    ...)$Assignments
+  }
+  
+  return(study.data)
+}
+
+
 #' Create cluster-correlated binary covariates using the \code{fabricatr} package. 
 #' @param indf the current data frame
 #' @param bin.props vector of probs; probabilities (proportions) with binary

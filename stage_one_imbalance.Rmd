@@ -21,12 +21,53 @@ source("./Code/analyze_imbalances.R")
 
 ```
 
-## 
+
+
+## Minimization Metrics
+Let $n_{A_{ij}}$ denote the number of patients that are on treatment A for the $j$-th level of prognostic factor $i$. Let $n_{A_{ijs}}$ denote the number of patients that are on treatment A for the $j$-th level of prognostic factor $i$ at site $s$. 
+$$n_A = \sum_{j = 1}^{k_i}n_{A_{ij}}$$
+Let $\mathcal{T}$ denote the set of treatments
+
+#### Minimization Formulas
+
+Marginal discrepancy between treatments $A$ and $B$
+
+Including an overall term:
+$$\text{MD} = w_0|n_A - n_B| + \sum_{i = 1}^K w_i\left(\sum_{j = 1}^{k_i} |n_{A_{ij}} - n_{B_{ij}}|\right)$$
+
+Without an overall term:
+$$\text{MD} = \sum_{i = 1}^K w_i\left(\sum_{j = 1}^{k_i} |n_{A_{ij}} - n_{B_{ij}}|\right)$$
+
+#### Metrics
+\begin{itemize}
+\item Study-wide treatment imbalance: $$\max_{a, \, b \neq a \in \mathcal{T}}|n_a - n_b|$$
+
+\item Study-wide prognostic factor: $$\max_{a, \, b \in \mathcal{T}}|n_{a_{ij}} - n_{b_{ij}}|$$
+
+\item Within-site overall treatment imbalance: $$\max_{s} \max_{a, b \in \mathcal{T}}|n_{a_s} - n_{b_s}|$$
+
+\item Within-site prognostic factor imbalance: $$\max_s \max_{a, \, b \in \mathcal{T}}|n_{a_{ijs}} - n_{b_{ijs}}|$$
+
+\end{itemize}
+
+
+### Accounting for contraindications
+
+
 
 ```{r sim_settings}
-sim_reps <- 1000L
+sim_reps <- 1e4 #10,000
 covariate_dimensions <- 1:4
 d_dim <- length(covariate_dimensions)
+
+#### Behavior flags
+save_sim_data <- FALSE
+sim_save_dir <- ""
+
+use_saved_covar_data <- FALSE
+saved_covar_path <- ""
+
+#### Simulation Parameters
 sim_seed <- 3990
 # Seed from https://nclottery.com/Pick4 Daytime Draw Thursday, Sep 16
 
@@ -80,69 +121,67 @@ CreateImbalanceTable <- function(imbalances.df, method.name, d.dim){
 }
 ```
 
+```{r covariate_data_gen}
+library(tictoc)
+tic()
+if(use_saved_covar_data == FALSE){
+  covar_data_list <- future_map(seq_len(sim_reps), 
+                            ~GenerateStudyCovariateData(i = ., 
+                                               n.subj = n_subj,
+                                               k.arms = k_arms, 
+                                               n.sites = n_sites, 
+                                               bin.props = bin_props, 
+                                               bin.iccs = bin_iccs,
+                                               contra.probs = contra_probs),
+                            .options = furrr_options(seed = sim_seed))
+  
+  if(save_sim_data == TRUE){
+    saveRDS(covar_data_list, file = paste0(sim_save_dir, lubridate::today(), "-sim_run.rds"))
+  }
+} else{
+  covar_data_list <- read_rds(saved_covar_path)
+}
+toc()
+```
 
-```{r site_strat_with_contras}
+
+```{r site_strat_with_contras, eval = FALSE}
 # No stratification by site or contraindication, no overall imbalance term
-contras_unstrat_no_overall <- future_map(seq_len(sim_reps), 
-                            ~GenerateStudyData(i = ., 
-                                               n.subj = n_subj,
-                                               k.arms = k_arms, 
-                                               n.sites = n_sites, 
-                                               bin.props = bin_props, 
-                                               bin.iccs = bin_iccs,
-                                               bias = coin_bias,
-                                               stratify.by.site = FALSE,
-                                               stratify.by.contra = FALSE,
-                                               contra.probs = contra_probs),
+contras_unstrat_no_overall <- future_map(covar_data_list, 
+                            ~GenerateAssignments(study.data = .,
+                                                 n.sites = n_sites,
+                                                 k.arms = k_arms, 
+                                               stratify.by.site = FALSE),
                             .options = furrr_options(seed = sim_seed))
-
 # No stratification by site or contraindication, includes an overall imbalance term
-contras_unstrat_w_overall <- future_map(seq_len(sim_reps), 
-                            ~GenerateStudyData(i = ., 
-                                               n.subj = n_subj,
+contras_unstrat_w_overall <- future_map(covar_data_list, 
+                            ~GenerateStudyData(study.data = .,
                                                k.arms = k_arms, 
                                                n.sites = n_sites, 
-                                               bin.props = bin_props, 
-                                               bin.iccs = bin_iccs,
-                                               bias = coin_bias,
                                                stratify.by.site = FALSE,
-                                               stratify.by.contra = FALSE,
-                                               use.overall.imbalance = TRUE,
-                                               contra.probs = contra_probs),
+                                               use.overall.imbalance = TRUE),
                             .options = furrr_options(seed = sim_seed))
 
 # Stratification by site but not contraindication, no overall imbalance term
-contras_strat_by_site <- future_map(seq_len(sim_reps), 
-                            ~GenerateStudyData(i = ., 
-                                               n.subj = n_subj,
-                                               k.arms = k_arms, 
-                                               n.sites = n_sites, 
-                                               bin.props = bin_props, 
-                                               bin.iccs = bin_iccs,
-                                               bias = coin_bias,
-                                               stratify.by.site = TRUE,
-                                               stratify.by.contra = FALSE,
-                                               contra.probs = c(.55, .4, .025, .025)),
+contras_strat_by_site <- future_map(covar_data_list, 
+                            ~GenerateAssignments(study.data = .,
+                                                 n.sites = n_sites,
+                                                 k.arms = k_arms, 
+                                               stratify.by.site = TRUE),
                             .options = furrr_options(seed = sim_seed))
 
 # Stratification by site but not contraindication, no overall imbalance term
-contras_strat_by_site_w_overall <- future_map(seq_len(sim_reps), 
-                            ~GenerateStudyData(i = ., 
-                                               n.subj = n_subj,
+contras_strat_by_site_w_overall <- future_map(covar_data_list, 
+                            ~GenerateStudyData(study.data = .,
                                                k.arms = k_arms, 
                                                n.sites = n_sites, 
-                                               bin.props = bin_props, 
-                                               bin.iccs = bin_iccs,
-                                               bias = coin_bias,
                                                stratify.by.site = TRUE,
-                                               stratify.by.contra = FALSE,
-                                               use.overall.imbalance = TRUE,
-                                               contra.probs = c(.55, .4, .025, .025)),
+                                               use.overall.imbalance = TRUE),
                             .options = furrr_options(seed = sim_seed))
 
 ```
 
-```{r site_strat_imbalances}
+```{r site_strat_imbalances, cache=TRUE}
 imbalances_contras_unstrat <- ImbalanceWrapper(contras_unstrat_no_overall, d_dim)
 imbalances_contras_unstrat_overall_term <- ImbalanceWrapper(contras_unstrat_w_overall, d_dim)
 imbalances_strat_by_site <- ImbalanceWrapper(contras_strat_by_site, d.dim = d_dim)
@@ -152,5 +191,4 @@ imbalance_table_unstrat <- CreateImbalanceTable(imbalances_contras_unstrat, "Uns
 imbalance_table_overall_term <- CreateImbalanceTable(imbalances_contras_unstrat_overall_term, "Unstratified, overall term", d_dim)
 imbalance_table_strat_by_site <- CreateImbalanceTable(imbalances_strat_by_site, "Stratified by site, no overall term", d_dim)
 imbalance_table_strat_by_site_overall <- CreateImbalanceTable(imbalances_strat_by_site_overall_term, "Stratified by site, overall term", d_dim)
-
 ```
