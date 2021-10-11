@@ -155,7 +155,7 @@ contras_unstrat_no_overall <- future_map(covar_data_list,
                             .options = furrr_options(seed = sim_seed))
 # No stratification by site or contraindication, includes an overall imbalance term
 contras_unstrat_w_overall <- future_map(covar_data_list, 
-                            ~GenerateStudyData(study.data = .,
+                            ~GenerateAssignments(study.data = .,
                                                k.arms = k_arms, 
                                                n.sites = n_sites, 
                                                stratify.by.site = FALSE,
@@ -172,7 +172,7 @@ contras_strat_by_site <- future_map(covar_data_list,
 
 # Stratification by site but not contraindication, no overall imbalance term
 contras_strat_by_site_w_overall <- future_map(covar_data_list, 
-                            ~GenerateStudyData(study.data = .,
+                            ~GenerateAssignments(study.data = .,
                                                k.arms = k_arms, 
                                                n.sites = n_sites, 
                                                stratify.by.site = TRUE,
