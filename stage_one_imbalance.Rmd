@@ -11,6 +11,7 @@ knitr::opts_chunk$set(echo = FALSE)
 
 ```{r libs_and_scripts, include = FALSE}
 library(tidyverse)
+library(data.table)
 library(fabricatr)
 library(furrr)
 if (str_detect(here::here(), "jsperger") == TRUE) plan(multisession, workers = 12) else plan(sequential)
@@ -56,13 +57,13 @@ $$\text{MD} = \sum_{i = 1}^K w_i\left(\sum_{j = 1}^{k_i} |n_{A_{ij}} - n_{B_{ij}
 
 
 ```{r sim_settings}
-sim_reps <- 1e4 #10,000
-covariate_dimensions <- 1:4
-d_dim <- length(covariate_dimensions)
+sim_reps <- 1e3
+d_dim <- 4
+covariate_dimensions <- 1:d_dim
 
 #### Behavior flags
 save_sim_data <- FALSE
-sim_save_dir <- ""
+sim_save_dir <- "./Results/"
 
 use_saved_covar_data <- FALSE
 saved_covar_path <- ""
@@ -72,7 +73,7 @@ sim_seed <- 3990
 # Seed from https://nclottery.com/Pick4 Daytime Draw Thursday, Sep 16
 
 # Study parameters
-n_subj <- 740
+n_subj <- 630
 n_sites <- 10
 k_arms <- 4
 
@@ -82,9 +83,46 @@ bin_props = seq(from = .1, to = .9, length.out = length(covariate_dimensions))
 bin_iccs = .05
 contra_probs <- c(.55, .4, .025, .025) # None, dulox, pt, cbt
 
+sim_run_settings <- list(sim_reps = sim_reps, 
+                     covariate_dimensions = covariate_dimensions,
+                     d_dim = d_dim,
+                     n_subj = n_subj,
+                     n_sites = n_sites,
+                     k_arms = k_arms,
+                     coin_bias = coin_bias,
+                     bin_props = bin_props,
+                     bin_iccs = bin_iccs,
+                     contra_probs = contra_probs)
+```
+
+```{r sim_alt_settings}
+# Define Alternative Settings
+
+icc_settings <- c(.05, .15, .3)
+
+dulox_ineligible_props <- seq(from = .3, to = .6, length.out = 3)
+
+dulox_ineligible_settings <- map(dulox_ineligible_props, ~c(.x, 1 - (.x + .05), .025, .025))
+
+settings_mixtures <- expand_grid(icc_settings, dulox_ineligible_settings)
+
+icc_dulox_variant_settings <- map2(settings_mixtures$icc_settings, settings_mixtures$dulox_ineligible_settings, ~list_modify(sim_run_settings, bin_iccs = .x, contra_probs = .y))
+
 ```
 
 ```{r wrappers}
+RunSimsFromSettingsList <- function(args.list){
+  sim_data <-   map(1:args.list$sim_reps, ~GenerateStudyCovariateData(i = .,
+                                               n.subj = args.list$n_subj,
+                                               k.arms = args.list$k_arms, 
+                                               n.sites = args.list$n_sites, 
+                                               bin.props = args.list$bin_props, 
+                                               bin.iccs = args.list$bin_iccs,
+                                               contra.probs = args.list$contra_probs))
+  
+  return(sim_data)
+}
+
 ImbalanceWrapper <- function(df.list, d.dim){
   future_map_dfr(df.list, ~AnalyzeImbalances(indf = ., vars.to.check = paste0("X_", 1:d.dim)))
 }
@@ -144,41 +182,72 @@ if(use_saved_covar_data == FALSE){
 toc()
 ```
 
+```{r covaraite_data_gen_alt_assumptions}
+library(tictoc)
+tic()
+  covar_data_variants_list <- future_map(icc_dulox_variant_settings, RunSimsFromSettingsList,
+                            .options = furrr_options(seed = sim_seed))
+  
+toc()
+```
+
 
 ```{r site_strat_with_contras, eval = FALSE}
+tic()
 # No stratification by site or contraindication, no overall imbalance term
-contras_unstrat_no_overall <- future_map(covar_data_list, 
+contras_unstrat_no_overall <- map_dfr(covar_data_variants_list, 
+                                  ~future_map_dfr(., 
                             ~GenerateAssignments(study.data = .,
                                                  n.sites = n_sites,
                                                  k.arms = k_arms, 
                                                stratify.by.site = FALSE),
-                            .options = furrr_options(seed = sim_seed))
+                            .options = furrr_options(seed = sim_seed), .id = 'Replication'),
+                            .id = 'Setting')
+toc()
+
+if(save_sim_data == TRUE) write_csv(x = contras_unstrat_no_overall,
+                                    file = paste0(sim_save_dir, "unstrat_no_overall", lubridate::now(), ".csv"))
+
 # No stratification by site or contraindication, includes an overall imbalance term
-contras_unstrat_w_overall <- future_map(covar_data_list, 
+contras_unstrat_w_overall <- map_dfr(covar_data_variants_list, 
+                                  ~future_map_dfr(., 
                             ~GenerateAssignments(study.data = .,
-                                               k.arms = k_arms, 
-                                               n.sites = n_sites, 
+                                                 n.sites = n_sites,
+                                                 k.arms = k_arms, 
                                                stratify.by.site = FALSE,
-                                               use.overall.imbalance = TRUE),
-                            .options = furrr_options(seed = sim_seed))
+                                                use.overall.imbalance = TRUE),
+                            .options = furrr_options(seed = sim_seed), .id = 'Replication'),
+                            .id = 'Setting')
+
+if(save_sim_data == TRUE) write_csv(x = contras_unstrat_w_overall,
+                                    file = paste0(sim_save_dir, "unstrat_w_overall", lubridate::now(), ".csv"))
 
 # Stratification by site but not contraindication, no overall imbalance term
-contras_strat_by_site <- future_map(covar_data_list, 
+contras_strat_by_site <- map_dfr(covar_data_variants_list, 
+                                  ~future_map_dfr(., 
                             ~GenerateAssignments(study.data = .,
                                                  n.sites = n_sites,
                                                  k.arms = k_arms, 
                                                stratify.by.site = TRUE),
-                            .options = furrr_options(seed = sim_seed))
+                            .options = furrr_options(seed = sim_seed), .id = 'Replication'),
+                            .id = 'Setting')
+
+if(save_sim_data == TRUE) write_csv(x = contras_strat_by_site,
+                                    file = paste0(sim_save_dir, "strat_by_site", lubridate::now(), ".csv"))
 
 # Stratification by site but not contraindication, no overall imbalance term
-contras_strat_by_site_w_overall <- future_map(covar_data_list, 
+contras_strat_by_site_w_overall <- map_dfr(covar_data_variants_list, 
+                                  ~future_map_dfr(., 
                             ~GenerateAssignments(study.data = .,
-                                               k.arms = k_arms, 
-                                               n.sites = n_sites, 
+                                                 n.sites = n_sites,
+                                                 k.arms = k_arms, 
                                                stratify.by.site = TRUE,
-                                               use.overall.imbalance = TRUE),
-                            .options = furrr_options(seed = sim_seed))
+                                                use.overall.imbalance = TRUE),
+                            .options = furrr_options(seed = sim_seed), .id = 'Replication'),
+                            .id = 'Setting')
 
+if(save_sim_data == TRUE) write_csv(x = contras_strat_by_site_w_overall,
+                                    file = paste0(sim_save_dir, "strat_by_site_w_overall", lubridate::now(), ".csv"))
 ```
 
 ```{r site_strat_imbalances, cache=TRUE}
@@ -191,4 +260,7 @@ imbalance_table_unstrat <- CreateImbalanceTable(imbalances_contras_unstrat, "Uns
 imbalance_table_overall_term <- CreateImbalanceTable(imbalances_contras_unstrat_overall_term, "Unstratified, overall term", d_dim)
 imbalance_table_strat_by_site <- CreateImbalanceTable(imbalances_strat_by_site, "Stratified by site, no overall term", d_dim)
 imbalance_table_strat_by_site_overall <- CreateImbalanceTable(imbalances_strat_by_site_overall_term, "Stratified by site, overall term", d_dim)
+```
+
+```{r dt_imbalance_summaries}
 ```

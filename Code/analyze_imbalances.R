@@ -35,3 +35,15 @@ AnalyzeImbalances <- function(indf, vars.to.check){
                          "MaxSiteCovImbalance" = max(cluster_level_imbalances))  
   return(imbalance_summary)
 }
+
+#' Using data.table because map is slow
+#' 
+#' @param data.w.assignments
+#' @param vars.to.check
+AnalyzeImbalancesDT <- function(data.w.assignments, vars.to.check){
+  overall_imbalances <- data.w.assignments[,.(OverallImbalance = diff(range(table(A1)))), by = .(Setting, Replication)]
+  site_imbalances <- data.w.assignments[,.(SiteImbalance = diff(range(table(A1)))), by = .(Setting, Replication, Site)][,. (OverallSiteImbalance = max(SiteImbalance)), by = .(Setting, Replication)]
+  
+  
+  imbalance_summaries <- merge.data.table(overall_imbalances, site_imbalances, all = TRUE, key = "Setting, Replication")
+}
