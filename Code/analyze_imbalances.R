@@ -45,5 +45,48 @@ AnalyzeImbalancesDT <- function(data.w.assignments, vars.to.check){
   site_imbalances <- data.w.assignments[,.(SiteImbalance = diff(range(table(A1)))), by = .(Setting, Replication, Site)][,. (OverallSiteImbalance = max(SiteImbalance)), by = .(Setting, Replication)]
   
   
+  covar_imbalances <- .DTCalcImbalanceByCovar(data.w.assignments, vars.to.check[1])
+  
+  for(cur.var in vars.to.check[-1]){
+    temp_imbalance_df <- .DTCalcImbalanceByCovar(data.w.assignments, cur.var)
+    
+    covar_imbalances <- merge.data.table(covar_imbalances, temp_imbalance_df, all = TRUE, key = "Setting, Replication")
+  }
+  
+  largest_covar_imbalances <- covar_imbalances[, .(LargestCovarImbalance = max(.SD)), by = .(Setting, Replication)]
   imbalance_summaries <- merge.data.table(overall_imbalances, site_imbalances, all = TRUE, key = "Setting, Replication")
+  imbalance_summaries <- merge.data.table(overall_imbalances, covar_imbalances, all = TRUE, key = "Setting, Replication")
+  
+  imbalance_summaries <- merge.data.table(overall_imbalances, largest_covar_imbalances, all = TRUE, key = "Setting, Replication")
+  
+  return(imbalance_summaries)
+}
+
+.DTCalcOverallImbalance <- function(sim.dt){
+  overall_imbalances <- sim.dt[,.(OverallImbalance = diff(range(table(A1)))), by = .(Setting, Replication)]
+  
+  return(overall_imbalances)
+}
+
+.DTCalcSiteImbalance <- function(sim.dt){
+  site_imbalances <- sim.dt[,.(SiteImbalance = diff(range(table(A1)))), 
+                            by = .(Setting, Replication, Site)][,
+                                                                .(OverallSiteImbalance = max(SiteImbalance)), by = .(Setting, Replication)]
+  
+  
+  return(site_imbalances)
+}
+
+.DTCalcImbalanceByCovar <- function(sim.dt, var.name){
+  imbalance_var_name <- paste0("LargestFactorImb", var.name)
+  
+  overall_imbalance_by_covar <- sim.dt[,
+                                       .(FactorImbalance = diff(range(table(A1)))), 
+                                       by = .(Setting, Replication, get(var.name))][
+                                         ,.(LargestFactorImb = max(FactorImbalance)), 
+                                         by = .(Setting, Replication)]
+  
+  setnames(overall_imbalance_by_covar, "LargestFactorImb", imbalance_var_name)
+  
+  return(overall_imbalance_by_covar)
 }
